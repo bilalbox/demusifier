@@ -102,3 +102,7 @@ The script will:
    - Uses Demucs to separate vocals
    - Merges vocals with original video
 5. **Cleanup**: Removes temporary files and stops the studio
+
+## TODO
+
+- Currently, script works with a sinlge video file. It needs to accept and process playlists
