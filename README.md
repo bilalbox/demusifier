@@ -1,5 +1,5 @@
 # Demusifier
-
+![img](Demusifier.png)
 A tool that automatically removes background music from videos while preserving speech/vocals using Lightning AI's cloud infrastructure.
 
 ## Overview
