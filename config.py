@@ -14,9 +14,11 @@ INPUT_DIR = os.path.join(BASE_DIR, "input")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 WORKING_DIR = os.path.join(BASE_DIR, "working")
 
-# RUNPOD API ENDPOINT AND KEY
-RUNPOD_ENDPOINT = os.getenv("RUNPOD_ENDPOINT")
-RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")
+# Replicate API configuration
+REPLICATE_API_TOKEN = os.getenv(
+    "REPLICATE_API_TOKEN"
+)  # Replicate uses REPLICATE_API_TOKEN
+REPLICATE_MODEL = os.getenv("REPLICATE_MODEL")
 
 # Ensure directories exist
 for dir_path in [INPUT_DIR, OUTPUT_DIR, WORKING_DIR]:

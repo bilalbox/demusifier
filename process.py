@@ -1,19 +1,19 @@
 import os
-import sys
 import re
+import replicate
 import subprocess
-import requests
+import time
 import uuid
-import shutil
 from pathlib import Path
+
 
 from config import (
     BASE_DIR,
     INPUT_DIR,
     OUTPUT_DIR,
     WORKING_DIR,
-    RUNPOD_API_KEY,
-    RUNPOD_ENDPOINT,
+    REPLICATE_API_TOKEN,
+    REPLICATE_MODEL,
     setup_logger,
 )
 
@@ -116,67 +116,62 @@ def speed_up_audio(audio_path: str, speed_factor: float = 2.0) -> str:
         raise
 
 
-def call_runpod_api(audio_path: str) -> str:
-    """Call RunPod API to isolate vocals from audio file."""
-    if not RUNPOD_API_KEY:
-        raise ValueError("RUNPOD_API_KEY not found in environment variables")
+def isolate_vocals_with_replicate(audio_path: str) -> str:
+    """Isolate vocals from audio file using Replicate API."""
+    if not REPLICATE_API_TOKEN:
+        raise ValueError("REPLICATE_API_TOKEN not found in environment variables")
 
-    # Upload audio file and get the vocals back
-    # For now, we'll simulate this by returning the input path
-    # In a real implementation, you'd upload the file and process it
+    # Set the API token for replicate client
+    import os
+
+    os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
+
     working_dir = os.path.dirname(audio_path)
     audio_name = Path(audio_path).stem
     vocals_path = os.path.join(working_dir, f"{audio_name}_vocals.mp3")
 
     try:
-        # Prepare the API call payload
-        payload = {
-            "input": {
-                "jobs": 0,
-                "stem": "vocals",  # We want vocals only
-                "audio": os.path.basename(audio_path),
-                "model": "htdemucs",
-                "split": True,
-                "shifts": 1,
-                "overlap": 0.25,
-                "clip_mode": "rescale",
-                "mp3_preset": 2,
-                "wav_format": "int24",
-                "mp3_bitrate": 320,
-                "output_format": "mp3",
-            }
-        }
+        logger.info("Calling Replicate API to isolate vocals...")
+        start_time = time.monotonic()
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {RUNPOD_API_KEY}",
-        }
-
-        # Make API call
-        response = requests.post(RUNPOD_ENDPOINT, headers=headers, json=payload)
-
-        if response.status_code != 200:
-            raise Exception(
-                f"RunPod API call failed: {response.status_code} - {response.text}"
+        # Open the audio file for Replicate API
+        with open(audio_path, "rb") as audio_file:
+            output = replicate.run(
+                REPLICATE_MODEL,
+                input={
+                    "audio": audio_file,
+                    "stem": "vocals",  # We want vocals only
+                },
             )
 
-        result = response.json()
-        logger.info(f"RunPod API call successful: {result}")
+        end_time = time.monotonic()
+        duration = end_time - start_time
+        logger.info(f"Replicate API processing completed in {duration:.2f} seconds!")
 
-        # Poll for completion and download result
-        # This is a simplified version - in reality you'd need to:
-        # 1. Upload the audio file to RunPod
-        # 2. Poll the job status until complete
-        # 3. Download the processed vocals file
+        # Handle the output - it should be a FileOutput object
+        if hasattr(output, "read"):
+            # Single file output
+            with open(vocals_path, "wb") as f:
+                f.write(output.read())
+        elif isinstance(output, dict) and "vocals" in output:
+            # Dictionary output with vocals key
+            vocals_output = output["vocals"]
+            with open(vocals_path, "wb") as f:
+                f.write(vocals_output.read())
+        elif isinstance(output, list) and len(output) > 0:
+            # List output, take the first file
+            with open(vocals_path, "wb") as f:
+                f.write(output[0].read())
+        else:
+            raise Exception(
+                f"Unexpected output format from Replicate API: {type(output)}"
+            )
 
-        # For now, copy the original file as a placeholder
-        shutil.copy2(audio_path, vocals_path)
-        logger.info(f"Vocals isolated (placeholder): {vocals_path}")
-
+        logger.info(f"Vocals isolated and saved to: {vocals_path}")
         return vocals_path
 
     except Exception as e:
-        logger.error(f"Error calling RunPod API: {str(e)}")
+        logger.error(f"Error calling Replicate API: {str(e)}")
         raise
 
 
@@ -245,17 +240,19 @@ def merge_audio_video_streams(
         raise
 
 
-def process_video(video_file: str, dry_run: bool = True) -> str:
+def process_video(video_file: str, dry_run: bool = False, cleanup: bool = True) -> str:
     """
     Main function to process the video with optional dry run mode.
 
     Args:
         video_file: Path to the input video file
-        dry_run: If True, skip RunPod API call for vocal isolation
+        dry_run: If True, skip Replicate API call for vocal isolation
+        cleanup: If True, clean up input and working directories after processing
 
     Returns:
         Path to the processed video file
     """
+    working_dir = None
     try:
         # Create unique working directory for this job
         job_id = str(uuid.uuid4())
@@ -275,37 +272,51 @@ def process_video(video_file: str, dry_run: bool = True) -> str:
         logger.info("Step 1: Splitting video into audio and video streams...")
         audio_path, video_only_path = split_video_streams(video_file, working_dir)
 
-        # Step 2: Speed up audio to 2x
-        logger.info("Step 2: Speeding up audio to 2x...")
-        # sped_audio_path = speed_up_audio(audio_path, speed_factor=2.0)
-
-        # Step 3: Process audio (RunPod API call or skip if dry_run)
+        # Step 2: Process audio with Replicate API (or skip if dry_run)
         if not dry_run:
-            logger.info("Step 3: Calling RunPod API to isolate vocals...")
-            # vocals_path = call_runpod_api(sped_audio_path)
-            vocals_path = call_runpod_api(audio_path)
+            logger.info("Step 2: Isolating vocals using Replicate API...")
+            vocals_path = isolate_vocals_with_replicate(audio_path)
         else:
-            logger.info("Step 3: Skipping RunPod API call (dry run mode)")
-            # vocals_path = sped_audio_path
+            logger.info("Step 2: Skipping vocal isolation (dry run mode)")
             vocals_path = audio_path
 
-        # Step 4: Slow audio back down to 1x
-        logger.info("Step 4: Slowing audio back down to 1x...")
-        # final_audio_path = slow_down_audio(vocals_path, speed_factor=0.5)
-        final_audio_path = vocals_path
-
-        # Step 5: Merge audio and video using streamcopy
-        logger.info("Step 5: Merging audio and video streams...")
+        # Step 3: Merge audio and video using streamcopy
+        logger.info("Step 3: Merging audio and video streams...")
         final_video_path = merge_audio_video_streams(
-            video_only_path, final_audio_path, output_path
+            video_only_path, vocals_path, output_path
         )
 
-        # Cleanup intermediate files (optional)
-        # You might want to keep them for debugging
         logger.info(f"Processing complete. Output saved to: {final_video_path}")
+
+        # Cleanup if requested
+        if cleanup:
+            logger.info("Cleaning up temporary files...")
+            cleanup_directories(working_dir=working_dir, input_file=video_file)
 
         return final_video_path
 
     except Exception as e:
         logger.error(f"Error processing video: {str(e)}")
+        # Clean up on error if cleanup is enabled
+        if cleanup and working_dir:
+            cleanup_directories(working_dir=working_dir)
         raise
+
+
+def cleanup_directories(working_dir: str = None, input_file: str = None):
+    """Clean up files from input and working directories after processing."""
+    try:
+        # Clean up working directory
+        if working_dir and os.path.exists(working_dir):
+            import shutil
+
+            shutil.rmtree(working_dir)
+            logger.info(f"Cleaned up working directory: {working_dir}")
+
+        # Clean up input file if specified
+        if input_file and os.path.exists(input_file):
+            os.remove(input_file)
+            logger.info(f"Cleaned up input file: {input_file}")
+
+    except Exception as e:
+        logger.warning(f"Error during cleanup: {str(e)}")

@@ -1,4 +1,41 @@
-from fasthtml.common import *
+from fasthtml.common import (
+    FastHTML,
+    H2,
+    H4,
+    A,
+    Span,
+    P,
+    Ul,
+    Input,
+    Form,
+    Video,
+    Div,
+    Li,
+    Script,
+    Html,
+    Head,
+    Meta,
+    Body,
+    Title,
+    serve,
+)
+from monsterui.all import (
+    Theme,
+    DivCentered,
+    Card,
+    CardHeader,
+    CardBody,
+    UkIcon,
+    Button,
+    ButtonT,
+    TextT,
+    Container,
+    Alert,
+    AlertT,
+    DivLAligned,
+    Label,
+    Progress,
+)
 from starlette.responses import RedirectResponse, FileResponse, Response
 from starlette.requests import Request
 import asyncio
@@ -11,6 +48,12 @@ from process import process_video
 from config import INPUT_DIR, OUTPUT_DIR, setup_logger
 import traceback
 import json
+from typing import List
+import re
+
+from components import BackButton
+from auth import Auth, cli
+
 
 # Set up logging
 logger = setup_logger(__name__)
@@ -25,10 +68,86 @@ JOB_STATUS_PROCESSING = "processing"
 JOB_STATUS_COMPLETE = "complete"
 JOB_STATUS_ERROR = "error"
 
-# Create FastHTML app with PicoCSS
-app, rt = fast_app(
-    pico=True,  # Enable PicoCSS with default styles
-)
+# Create FastHTML app with MonsterUI
+app = FastHTML(hdrs=(Theme.blue.headers()))
+oauth = Auth(app=app, cli=cli)
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return RedirectResponse("/static/images/favicon.ico")
+
+
+def login_form(req):
+    return DivCentered(
+        Card(
+            CardHeader(
+                UkIcon(icon="audio-waveform", height=75, width=75),
+                H2("Demusicator"),
+            ),
+            CardBody(
+                A(
+                    Button(
+                        Span(
+                            UkIcon("chrome", cls="mr-2"),
+                            "Login with Google",
+                            cls="flex items-center justify-center",
+                        ),
+                        cls=(
+                            ButtonT.primary,
+                            TextT.medium,
+                            "rounded-lg",
+                        ),
+                        submit=False,
+                    ),
+                    href=oauth.login_link(req),
+                    cls="no-underline",
+                ),
+                cls="flex items-center justify-center max-w-md mx-auto p-8 rounded-lg shadow-md",
+            ),
+        ),
+        cls="flex items-center justify-center min-h-screen",
+    )
+
+
+def logout_form():
+    return Container(
+        Card(
+            CardHeader(
+                "Mohon logout lalu login akun Google yang diizinkan oleh SPP.",
+                cls="text-xl font-bold mb-4",
+            ),
+            CardBody(
+                A(
+                    Button(
+                        "Logout",
+                        cls=(ButtonT.primary, "rounded-lg"),
+                        button=True,
+                    ),
+                    href="/auth/logout",
+                ),
+                cls="flex items-center justify-center max-w-md mx-auto p-8 rounded-lg shadow-md",
+            ),
+            cls="flex items-center justify-center min-h-screen",
+        ),
+    )
+
+
+@app.get("/login")
+def login(req):
+    login_content = login_form(req)
+
+    return Title("Login"), login_content
+
+
+@app.get("/auth/logout")
+def logout(session):
+    # Clear the session
+    for key in list(session.keys()):
+        session.pop(key)
+
+    # Redirect to login page
+    return RedirectResponse("/", status_code=302)
 
 
 def create_job(video_file_path, original_filename):
@@ -84,20 +203,20 @@ def process_video_async(job_id, video_file_path):
         )
 
         update_job_status(job_id, JOB_STATUS_PROCESSING, progress=50)
-        result_path = process_video(video_file_path, dry_run=True)
+        result_path = process_video(video_file_path, dry_run=False)
 
         if result_path and os.path.exists(result_path):
-            # Rename the file to include job_id for tracking
-            original_filename = os.path.basename(result_path)
-            new_filename = f"{job_id}_{original_filename}"
-            new_filepath = os.path.join(OUTPUT_DIR, new_filename)
+            # Clean up the filename: use original name + _processed + extension
+            original_filename = jobs[job_id]["original_filename"]
+            base, ext = os.path.splitext(original_filename)
+            clean_filename = f"{base}_processed{ext}"
+            new_filepath = os.path.join(OUTPUT_DIR, clean_filename)
 
-            # Rename the file if it's not already named with job_id
-            if result_path != new_filepath:
-                shutil.move(result_path, new_filepath)
+            # Move/rename the processed file to the clean filename
+            shutil.move(result_path, new_filepath)
 
             update_job_status(
-                job_id, JOB_STATUS_COMPLETE, progress=100, output_file=new_filename
+                job_id, JOB_STATUS_COMPLETE, progress=100, output_file=clean_filename
             )
             logger.info(f"Job {job_id} completed successfully. Output: {new_filepath}")
         else:
@@ -114,87 +233,78 @@ def process_video_async(job_id, video_file_path):
         update_job_status(job_id, JOB_STATUS_ERROR, progress=100, error_message=str(e))
 
 
-def create_layout(content):
-    """Create consistent layout with header and navigation"""
-    return Html(
-        Head(
-            Title("Demusicator - AI Video Music Separation"),
-            Meta(name="viewport", content="width=device-width, initial-scale=1"),
+def nav_menu():
+    return Div(
+        DivLAligned(
+            A("Home", href="/", cls="px-4 py-2 font-semibold hover:underline"),
+            A(
+                "Processed Videos",
+                href="/videos",
+                cls="px-4 py-2 font-semibold hover:underline",
+            ),
+            A(
+                "Logout",
+                href="/auth/logout",
+                cls="px-4 py-2 font-semibold hover:underline",
+            ),
+            cls="space-x-4",
         ),
-        Body(
-            Main(
-                Container(
-                    Header(
-                        H1(
-                            "🎵 Demusicator",
-                            style="text-align: center; margin-bottom: 1rem;",
-                        ),
-                        P(
-                            "Separate music from video using AI",
-                            style="text-align: center; color: var(--muted-color); margin-bottom: 2rem;",
-                        ),
-                    ),
-                    content,
-                    style="max-width: 800px; margin: 0 auto; padding: 2rem;",
-                )
-            )
-        ),
+        cls="w-full flex justify-center py-4 border-b mb-8 backdrop-blur",
     )
 
 
-@rt("/")
-def get():
-    """Landing page with file upload form"""
-    form = Form(
-        Fieldset(
-            Legend("Process Video"),
-            Label(
-                "Upload Video File:",
-                Input(
-                    type="file",
-                    name="video_file",
-                    accept="video/*,.mp4,.avi,.mov,.mkv,.webm",
-                    required=True,
-                    style="margin-top: 0.5rem;",
+def create_layout(content):
+    """App layout styled to match login_form: full-page centered, card with consistent styles, with nav menu."""
+    return Div(
+        nav_menu(),
+        DivCentered(
+            Card(
+                CardHeader(
+                    DivCentered(
+                        UkIcon(icon="audio-waveform", height=75, width=75),
+                        H2("Demusicator"),
+                        H4("AI-Powered Video Music Removal"),
+                    ),
+                ),
+                CardBody(
+                    content,
+                    cls="flex items-center justify-center max-w-md mx-auto rounded-lg",
                 ),
             ),
-            P(
-                "Supported formats: MP4, AVI, MOV, MKV, WebM",
-                style="font-size: 0.8rem; color: var(--muted-color); margin-top: 0.25rem;",
+            cls="flex items-center justify-center min-h-screen",
+        ),
+        cls="min-h-screen",
+    )
+
+
+@app.get("/")
+def index():
+    """Landing page with file upload form using MonsterUI components only, styled like login_form."""
+    form = Form(
+        Div(
+            P("Choose a Video File to get started"),
+            Input(
+                type="file",
+                name="video_file",
+                accept="video/*,.mp4,.avi,.mov,.mkv,.webm",
+                required=True,
             ),
-            Button(
-                "🚀 Process Video",
-                type="submit",
-                style="margin-top: 1rem; width: 100%;",
-            ),
+            P("📁 Supported: MP4, AVI, MOV, MKV, WebM"),
+        ),
+        Button(
+            "🎯 Process Video",
+            type="submit",
+            cls=(ButtonT.primary, TextT.medium, "rounded-lg w-full mt-4"),
         ),
         method="post",
         action="/videos",
         enctype="multipart/form-data",
-        style="margin-bottom: 2rem;",
+        cls="space-y-8",
     )
-
-    info_section = Article(
-        Header(H3("How it works")),
-        Ol(
-            Li("Upload a video file from your device"),
-            Li("Our AI will process the video"),
-            Li("Music will be separated from the original audio"),
-            Li("Download your processed video"),
-        ),
-        Footer(
-            Small(
-                "⚡ Powered by RunPod AI • 🤖 Demucs AI Model",
-                style="color: var(--muted-color);",
-            )
-        ),
-    )
-
-    content = Div(form, info_section)
-    return create_layout(content)
+    return create_layout(form)
 
 
-@rt("/videos", methods=["POST"])
+@app.post("/videos")
 async def create_video_job(request: Request):
     """Create video processing job from uploaded file"""
     try:
@@ -204,10 +314,10 @@ async def create_video_job(request: Request):
 
         if not video_file or not hasattr(video_file, "filename"):
             return create_layout(
-                Article(
-                    Header(H2("❌ Error")),
-                    P("Please upload a valid video file."),
-                    A("← Go back", href="/", role="button", style="margin-top: 1rem;"),
+                Alert(
+                    "❌ No File Selected - Please select a valid video file to upload.",
+                    BackButton("/"),
+                    cls=AlertT.error,
                 )
             )
 
@@ -218,12 +328,10 @@ async def create_video_job(request: Request):
 
         if file_ext not in allowed_extensions:
             return create_layout(
-                Article(
-                    Header(H2("❌ Invalid File Type")),
-                    P(
-                        f"File type '{file_ext}' is not supported. Please upload: {', '.join(allowed_extensions)}"
-                    ),
-                    A("← Go back", href="/", role="button", style="margin-top: 1rem;"),
+                Alert(
+                    "❌ Invalid File Type",
+                    f"File type '{file_ext}' is not supported. Please upload: {', '.join(allowed_extensions)}",
+                    Button("/"),
                 )
             )
 
@@ -254,23 +362,146 @@ async def create_video_job(request: Request):
         logger.error(f"Error handling file upload: {str(e)}")
         logger.error(traceback.format_exc())
         return create_layout(
-            Article(
-                Header(H2("❌ Upload Error")),
-                P(f"Error processing upload: {str(e)}"),
-                A("← Go back", href="/", role="button", style="margin-top: 1rem;"),
+            Alert(
+                "❌ Upload Error",
+                f"Error processing upload: {str(e)}",
+                Button("/"),
             )
         )
 
 
-@rt("/videos/{job_id}")
+@app.get("/videos/{job_id}")
+def video_detail(job_id: str):
+    """Show video preview and download for a processed video by video_id."""
+    # Find the file in OUTPUT_DIR that starts with video_id
+    for fname in os.listdir(OUTPUT_DIR):
+        if fname.startswith(job_id + "_"):
+            file_path = os.path.join(OUTPUT_DIR, fname)
+            break
+    else:
+        return create_layout(
+            Alert(
+                "Video not found.",
+                BackButton("/videos"),
+            )
+        )
+
+    # Show video preview and download
+    return create_layout(
+        Card(
+            CardHeader(H2("🎬 Video Preview")),
+            CardBody(
+                Video(
+                    controls=True,
+                    preload="metadata",
+                    src=f"/videos/{job_id}/stream",
+                    cls="w-full max-w-lg mx-auto mb-4",
+                ),
+                Div(
+                    A(
+                        Button("⬇️ Download Video"),
+                        href=f"/videos/{job_id}/download",
+                        download=True,
+                    ),
+                    Button(
+                        "← Back to List",
+                        hx_get="/videos",
+                        hx_push_url="true",
+                        hx_target="body",
+                    ),
+                    cls="flex gap-4 mt-4",
+                ),
+            ),
+        )
+    )
+
+
+@app.get("/videos")
+def videos_list():
+    """Display a list of all processed videos with links to their detail pages."""
+    videos = list_videos()
+    if not videos:
+        content = P("No processed videos found.")
+    else:
+        content = Ul(
+            *[
+                Li(
+                    A(
+                        video["display_name"],
+                        href=f"/videos/{video['video_id']}",
+                        cls="text-blue-600 underline",
+                    ),
+                    cls="mb-2",
+                )
+                for video in videos
+            ]
+        )
+    return create_layout(Div(H2("Processed Videos"), content, cls="space-y-4"))
+
+
+def extract_display_name(filename):
+    """Extract a user-friendly display name from a processed video filename."""
+    # Remove leading UUID and trailing _processed_UUID if present
+    # Example: 14df24c0-..._The Giant Pond Rat That Built America_processed_ba61c6a1-...mp4
+    # Should become: The Giant Pond Rat That Built America
+    name = filename
+    # Remove leading UUID and underscore
+    name = re.sub(r"^[0-9a-fA-F-]+_", "", name)
+    # Remove trailing _processed_UUID
+    name = re.sub(r"_processed_[0-9a-fA-F-]+", "", name)
+    # Remove file extension
+    name = re.sub(r"\.[^.]+$", "", name)
+    return name
+
+
+def list_videos():
+    """Return a list of all processed videos in OUTPUT_DIR."""
+    videos = []
+    for fname in os.listdir(OUTPUT_DIR):
+        if (
+            fname.endswith((".mp4", ".avi", ".mov", ".mkv", ".webm"))
+            and "_processed" in fname
+        ):
+            base, ext = os.path.splitext(fname)
+            display_name = base.replace("_processed", "")
+            videos.append(
+                {"video_id": fname, "filename": fname, "display_name": display_name}
+            )
+    return videos
+
+
+@app.get("/videos/{video_id}/download")
+def download_video_by_id(video_id: str):
+    """Serve the processed video file for download by video_id."""
+    for fname in os.listdir(OUTPUT_DIR):
+        if fname.startswith(video_id + "_"):
+            file_path = os.path.join(OUTPUT_DIR, fname)
+            return FileResponse(path=file_path, media_type="video/mp4", filename=fname)
+    return Response("File not found", status_code=404)
+
+
+@app.get("/videos/{video_id}/stream")
+def stream_video_by_id(video_id: str):
+    """Serve the processed video file for streaming by video_id."""
+    for fname in os.listdir(OUTPUT_DIR):
+        if fname.startswith(video_id + "_"):
+            file_path = os.path.join(OUTPUT_DIR, fname)
+            return FileResponse(
+                path=file_path,
+                media_type="video/mp4",
+                headers={"Cache-Control": "no-cache"},
+            )
+    return Response("File not found", status_code=404)
+
+
 def get_video_status(job_id: str):
     """Get video processing status with polling"""
     if job_id not in jobs:
         return create_layout(
-            Article(
-                Header(H2("❌ Job Not Found")),
-                P(f"Job {job_id} not found."),
-                A("← Go back", href="/", role="button", style="margin-top: 1rem;"),
+            Alert(
+                "❌ Job Not Found",
+                f"Job {job_id} not found.",
+                BackButton("/"),
             )
         )
 
@@ -286,44 +517,23 @@ def get_video_status(job_id: str):
         or is_processing
     ):
         # Show processing page with auto-refresh
-        processing_content = Article(
-            Header(H2("🔄 Processing Video")),
-            P(f"Job ID: {job_id}"),
-            P(f"File: {job['original_filename']}"),
-            P(f"Status: {status.title()}"),
-            Progress(value=job["progress"], max=100, style="margin: 1rem 0;"),
-            P(f"Progress: {job['progress']}%"),
-            P("Steps:", style="margin-top: 1rem;"),
-            Ol(
-                Li(
-                    "Processing uploaded video file",
-                    style="color: green;" if job["progress"] > 10 else "",
-                ),
-                Li(
-                    "Splitting audio and video streams",
-                    style="color: green;" if job["progress"] > 30 else "",
-                ),
-                Li(
-                    "Running AI music separation",
-                    style="color: green;" if job["progress"] > 50 else "",
-                ),
-                Li(
-                    "Preparing download",
-                    style="color: green;" if job["progress"] > 90 else "",
-                ),
+        processing_content = Card(
+            CardHeader(
+                H2("🔄 Processing Your Video"),
+                Label("Processing"),
             ),
-            Details(
-                Summary("Technical Details"),
-                P(
-                    "We use the Demucs AI model running on RunPod's cloud infrastructure to separate music from video audio tracks."
+            CardBody(
+                Div(
+                    P(f"📄 Job ID: {job_id}"),
+                    P(f"📁 File: {job['original_filename']}"),
+                    Div(
+                        Progress(value=job["progress"], max=100),
+                        P(f"{job['progress']}% Complete"),
+                    ),
                 ),
             ),
             # Auto-refresh via script
-            Script("""
-                setTimeout(function() {
-                    window.location.reload();
-                }, 3000);
-            """),
+            Script("setTimeout(function() { window.location.reload(); }, 3000);"),
         )
 
         # Add meta refresh as well
@@ -334,88 +544,64 @@ def get_video_status(job_id: str):
                 Meta(httpEquiv="refresh", content="3"),
             ),
             Body(
-                Main(
-                    Container(
-                        Header(
-                            H1(
-                                "🎵 Demusifier",
-                                style="text-align: center; margin-bottom: 1rem;",
-                            ),
-                            P(
-                                "Separate music from video using AI",
-                                style="text-align: center; color: var(--muted-color); margin-bottom: 2rem;",
+                DivCentered(
+                    Card(
+                        CardHeader(
+                            H2("🔄 Processing Your Video"),
+                            Label("Processing"),
+                        ),
+                        CardBody(
+                            Div(
+                                P(f"📄 Job ID: {job_id}"),
+                                P(f"📁 File: {job['original_filename']}"),
+                                Div(
+                                    Progress(value=job["progress"], max=100),
+                                    P(f"{job['progress']}% Complete"),
+                                ),
                             ),
                         ),
-                        processing_content,
-                        style="max-width: 800px; margin: 0 auto; padding: 2rem;",
-                    )
-                )
+                    ),
+                ),
             ),
         )
 
     elif status == JOB_STATUS_COMPLETE:
-        # Show success page with video player
+        # Redirect to video detail page
+        # Find the output file and extract video_id
         output_file = job["output_file"]
-        if output_file and os.path.exists(os.path.join(OUTPUT_DIR, output_file)):
-            success_content = Article(
-                Header(H2("✅ Processing Complete!")),
-                P("Your video has been processed successfully."),
-                P(f"Processed file: {output_file}"),
-                # Embedded Video Player
-                Div(
-                    H3("🎬 Processed Video"),
-                    Video(
-                        controls=True,
-                        style="width: 100%; max-width: 800px; height: auto; border-radius: 0.5rem;",
-                        preload="metadata",
-                        src=f"/videos/{job_id}/stream",
-                    ),
-                    P("Video processing completed with AI music separation."),
-                    style="margin: 2rem 0; padding: 1rem; border: 1px solid var(--muted-border-color); border-radius: 0.5rem; text-align: center;",
-                ),
-                # Download button
-                Div(
-                    A(
-                        "⬇️ Download Video",
-                        href=f"/videos/{job_id}/download",
-                        role="button",
-                        style="margin-right: 1rem;",
-                        download=output_file,
-                    ),
-                    A(
-                        "← Process Another Video",
-                        href="/",
-                        role="button",
-                        style="margin-top: 1rem;",
-                    ),
-                    style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin-top: 2rem;",
-                ),
-            )
+        if output_file:
+            video_id = output_file.split("_", 1)[0]
+            return RedirectResponse(url=f"/videos/{video_id}", status_code=302)
         else:
-            success_content = Article(
-                Header(H2("⚠️ Processing Complete")),
-                P("Processing finished, but output file not found."),
-                A("← Go back", href="/", role="button", style="margin-top: 1rem;"),
+            return create_layout(
+                Alert(
+                    "Processing finished, but output file not found.",
+                    BackButton("/videos"),
+                )
             )
-
-        return create_layout(success_content)
 
     else:  # JOB_STATUS_ERROR
-        error_content = Article(
-            Header(H2("❌ Processing Failed")),
-            P(f"Error: {job.get('error_message', 'Unknown error')}"),
-            Details(
-                Summary("Job Details"),
-                P(f"Job ID: {job_id}"),
-                P(f"File: {job.get('original_filename', 'Unknown')}"),
-                P(f"Created: {time.ctime(job['created_at'])}"),
+        error_content = Card(
+            CardHeader(
+                H2("❌ Processing Failed"),
+                Label("Error"),
             ),
-            A("← Try Again", href="/", role="button", style="margin-top: 1rem;"),
+            CardBody(
+                P("😞 Sorry, we encountered an issue processing your video."),
+                Div(
+                    H4("Error Details:"),
+                    P(job.get("error_message", "Unknown error occurred")),
+                ),
+                Div(
+                    Button("🔄 Try Again", href="/"),
+                    Button("📧 Report Issue", href="#"),
+                ),
+            ),
         )
         return create_layout(error_content)
 
 
-@rt("/videos/{job_id}/download")
+@app.get("/videos/{job_id}/download")
 def download_video(job_id: str):
     """Serve the processed video file for download or streaming"""
     if job_id not in jobs:
@@ -434,7 +620,7 @@ def download_video(job_id: str):
     )
 
 
-@rt("/videos/{job_id}/stream")
+@app.get("/videos/{job_id}/stream")
 def stream_video(job_id: str):
     """Serve the processed video file for streaming/embedding"""
     if job_id not in jobs:
@@ -453,27 +639,4 @@ def stream_video(job_id: str):
     )
 
 
-@rt("/health")
-def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "service": "demusifier"}
-
-
-if __name__ == "__main__":
-    # Check for required environment variables
-    required_env_vars = [
-        "RUNPOD_API_KEY",
-    ]
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-
-    if missing_vars:
-        logger.error(
-            f"Missing required environment variables: {', '.join(missing_vars)}"
-        )
-        print(
-            f"Please set the following environment variables: {', '.join(missing_vars)}"
-        )
-        exit(1)
-
-    logger.info("Starting Demusifier FastHTML app...")
-    serve()
+serve()
