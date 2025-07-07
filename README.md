@@ -72,25 +72,19 @@ sequenceDiagram
         participant ui as Web UI
         participant ws as Web Server
         participant gpu as GPUaaS
-        participant s3 as Storage Bucket
         ui->>ws: POST /videos
         ws->>ui: 202 + /videos/videoId
         loop Polling
         ui->>ws: GET /videos/videoId
         ws->>ui: 200 + statusPage
         end
-        ws->ws: Download video (yt-dlp)
         ws->ws: Split media streams (ffmpeg)
-        ws->ws: Speed audio stream (ffmpeg)
         ws->>gpu: Send audio stream to GPU
         gpu->gpu: Isolate vocals (demucs)
         gpu->>ws: Return clean audio
         ws->ws: Merge audio and video (ffmpeg)
-        ws->>s3: POST processed video file
-        s3->>ws: 201 storageUrl
         ui->>ws: GET /videos/videoId
-        ws->>ui: 200 + video page (includes embedded player for storageUrl)
-        ui->>s3: streaming video from storageUrl
+        ws->>ui: 200 + video page (w/ embedded player for storageUrl)
 ```
 
 ## Setup in Lightning AI
