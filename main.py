@@ -118,7 +118,7 @@ def create_layout(content):
     """Create consistent layout with header and navigation"""
     return Html(
         Head(
-            Title("Demusifier - AI Video Music Separation"),
+            Title("Demusicator - AI Video Music Separation"),
             Meta(name="viewport", content="width=device-width, initial-scale=1"),
         ),
         Body(
@@ -126,7 +126,7 @@ def create_layout(content):
                 Container(
                     Header(
                         H1(
-                            "🎵 Demusifier",
+                            "🎵 Demusicator",
                             style="text-align: center; margin-bottom: 1rem;",
                         ),
                         P(

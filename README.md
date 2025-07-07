@@ -1,6 +1,6 @@
-# Demusifier
+# Demusicator
 
-![img](Demusifier.png)
+![img](logo.png)
 A web app that automatically removes background music from uploaded videos while preserving speech/vocals using Demucs running on Runpod.io's cloud infrastructure.
 
 ## Overview
@@ -15,7 +15,7 @@ This project consists of several Python scripts that work together to:
 
 - Python 3.11+
 - [Runpod.io](https://runpod.io) account
-- [Demucs STEM separator](https://github.com/facebookresearch/demucs)
+- [Demucs AI STEM audio separator](https://github.com/facebookresearch/demucs)
 - [Demucs container from Replicate registry](https://replicate.com/ryan5453/demucs)
 
 TODO: NEEDS TO BE REWRITTEN
