@@ -8,7 +8,11 @@ from starlette.responses import RedirectResponse
 
 load_dotenv()
 
-SUPERADMIN = os.getenv("SUPERADMIN")
+# Parse ALLOWED_EMAILS as a comma-separated list
+ALLOWED_EMAILS_RAW = os.getenv("ALLOWED_EMAILS", "")
+ALLOWED_EMAILS = [
+    email.strip() for email in ALLOWED_EMAILS_RAW.split(",") if email.strip()
+]
 
 
 cli = GoogleAppClient(
@@ -36,9 +40,8 @@ class Auth(OAuth):
         session["user_info"] = info
         user_email = info.get("email", "")
 
-        if user_email == SUPERADMIN:
-            session["user_group"] = "super_admin"
+        if user_email in ALLOWED_EMAILS:
+            return RedirectResponse("/", status_code=303)
         else:
-            session["user_group"] = "guest"
-
-        return RedirectResponse("/", status_code=303)
+            # Redirect to login page with unauthorized message
+            return RedirectResponse("/login?error=unauthorized", status_code=303)

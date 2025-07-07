@@ -5,27 +5,29 @@ from fasthtml.common import (
     A,
     Span,
     P,
-    Ul,
     Input,
     Form,
     Video,
     Div,
-    Li,
     Script,
     Html,
     Head,
     Meta,
     Body,
     Title,
+    Thead,
+    Tr,
     serve,
 )
 from monsterui.all import (
     Theme,
     DivCentered,
+    DivVStacked,
     Card,
     CardHeader,
     CardBody,
     UkIcon,
+    UkIconLink,
     Button,
     ButtonT,
     TextT,
@@ -35,6 +37,11 @@ from monsterui.all import (
     DivLAligned,
     Label,
     Progress,
+    Table,
+    TableT,
+    Th,
+    Tbody,
+    Td,
 )
 from starlette.responses import RedirectResponse, FileResponse, Response
 from starlette.requests import Request
@@ -112,11 +119,11 @@ def login_form(req):
     )
 
 
-def logout_form():
+def unauthorized_form():
     return Container(
         Card(
             CardHeader(
-                "Mohon logout lalu login akun Google yang diizinkan oleh SPP.",
+                "Please logout and login with an authorized Google account.",
                 cls="text-xl font-bold mb-4",
             ),
             CardBody(
@@ -137,9 +144,23 @@ def logout_form():
 
 @app.get("/login")
 def login(req):
+    # Check for error parameter
+    error = req.query_params.get("error")
+
     login_content = login_form(req)
 
-    return Title("Login"), login_content
+    if error == "unauthorized":
+        # Add unauthorized message above the login form
+        unauthorized_alert = Alert(
+            "❌ Unauthorized User",
+            "Your email address is not authorized to access this application. Please contact the administrator.",
+            cls=AlertT.error + " mb-4",
+        )
+        content = Div(unauthorized_alert, login_content)
+    else:
+        content = login_content
+
+    return Title("Login"), content
 
 
 @app.get("/auth/logout")
@@ -238,16 +259,16 @@ def process_video_async(job_id, video_file_path):
 def nav_menu():
     return Div(
         DivLAligned(
-            A("Home", href="/", cls="px-4 py-2 font-semibold hover:underline"),
+            A("Home", href="/", cls="px-4 py-2 font-semibold"),
             A(
                 "Processed Videos",
                 href="/videos",
-                cls="px-4 py-2 font-semibold hover:underline",
+                cls="px-4 py-2 font-semibold",
             ),
             A(
                 "Logout",
                 href="/auth/logout",
-                cls="px-4 py-2 font-semibold hover:underline",
+                cls="px-4 py-2 font-semibold",
             ),
             cls="space-x-4",
         ),
@@ -283,8 +304,8 @@ def create_layout(content):
 def index():
     """Landing page with file upload form using MonsterUI components only, styled like login_form."""
     form = Form(
-        Div(
-            P("Choose a Video File to get started"),
+        DivVStacked(
+            P("Upload a video file to get started"),
             Input(
                 type="file",
                 name="video_file",
@@ -294,7 +315,7 @@ def index():
             P("📁 Supported: MP4, AVI, MOV, MKV, WebM"),
         ),
         Button(
-            "🎯 Process Video",
+            "Process Video",
             type="submit",
             cls=(ButtonT.primary, TextT.medium, "rounded-lg w-full mt-4"),
         ),
@@ -422,19 +443,72 @@ def videos_list():
     if not videos:
         content = P("No processed videos found.")
     else:
-        content = Ul(
-            *[
-                Li(
-                    A(
-                        video["display_name"],
-                        href=f"/videos/{video['video_id']}",
-                        cls="text-blue-600 underline",
-                    ),
-                    cls="mb-2",
+        # Create table using MonsterUI components
+        table = Table(
+            Thead(
+                Tr(
+                    Th("Filename"),
+                    Th("Size", cls="text-center"),
+                    Th("Created", cls="text-center"),
+                    Th("Actions", cls="text-center"),
                 )
-                for video in videos
-            ]
+            ),
+            Tbody(
+                *[
+                    Tr(
+                        Td(
+                            A(
+                                video["display_name"],
+                                href=f"/videos/{video['filename']}",
+                                cls="text-blue-600 font-medium",
+                            )
+                        ),
+                        Td(
+                            f"{video['size_mb']:.1f} MB",
+                            cls="text-center text-gray-600",
+                        ),
+                        Td(
+                            video["created_date"],
+                            cls="text-center text-gray-600",
+                        ),
+                        Td(
+                            Div(
+                                A(
+                                    UkIcon("download", cls="w-5 h-5"),
+                                    href=f"/videos/{video['filename']}/download",
+                                    download=True,
+                                    cls=(
+                                        TextT.primary,
+                                        "inline-flex items-center justify-center w-8 h-8",
+                                    ),
+                                    title="Download",
+                                ),
+                                UkIconLink(
+                                    icon="x",
+                                    button=True,
+                                    hx_delete=f"/videos/{video['filename']}",
+                                    hx_target="body",
+                                    hx_confirm=f"Are you sure you want to delete '{video['display_name']}'?",
+                                    cls=(
+                                        TextT.error,
+                                        "text-2xl hover:scale-125 hover:brightness-125",
+                                    ),
+                                    title="Delete",
+                                ),
+                                cls="flex items-center justify-center",
+                            ),
+                            cls="text-center",
+                        ),
+                    )
+                    for video in videos
+                ]
+            ),
+            cls=(
+                TableT.hover,
+                "w-full border border-gray-200 rounded-lg overflow-hidden",
+            ),
         )
+        content = table
     return create_layout(Div(H2("Processed Videos"), content, cls="space-y-4"))
 
 
@@ -461,10 +535,29 @@ def list_videos():
             fname.endswith((".mp4", ".avi", ".mov", ".mkv", ".webm"))
             and "_processed" in fname
         ):
+            file_path = os.path.join(OUTPUT_DIR, fname)
+
+            # Get file size in MB
+            file_size_bytes = os.path.getsize(file_path)
+            size_mb = file_size_bytes / (1024 * 1024)
+
+            # Get creation date
+            created_timestamp = os.path.getctime(file_path)
+            created_date = time.strftime(
+                "%Y-%m-%d %H:%M", time.localtime(created_timestamp)
+            )
+
             base, ext = os.path.splitext(fname)
             display_name = base.replace("_processed", "")
+
             videos.append(
-                {"video_id": fname, "filename": fname, "display_name": display_name}
+                {
+                    "video_id": fname,
+                    "filename": fname,
+                    "display_name": display_name,
+                    "size_mb": size_mb,
+                    "created_date": created_date,
+                }
             )
     return videos
 
@@ -515,53 +608,27 @@ def get_video_status(job_id: str):
         status in [JOB_STATUS_PENDING, JOB_STATUS_DOWNLOADING, JOB_STATUS_PROCESSING]
         or is_processing
     ):
-        # Show processing page with auto-refresh
-        processing_content = Card(
-            CardHeader(
-                H2("🔄 Processing Your Video"),
-                Label("Processing"),
+        # Show processing page with consistent styling and HTMX auto-refresh
+        processing_content = Div(
+            P(f"📄 Job ID: {job_id}"),
+            P(f"📁 File: {job['original_filename']}"),
+            Div(
+                Progress(value=job["progress"], max=100),
+                P(f"{job['progress']}% Complete"),
+                cls="mt-4",
             ),
-            CardBody(
-                Div(
-                    P(f"📄 Job ID: {job_id}"),
-                    P(f"📁 File: {job['original_filename']}"),
-                    Div(
-                        Progress(value=job["progress"], max=100),
-                        P(f"{job['progress']}% Complete"),
-                    ),
-                ),
-            ),
-            # Auto-refresh via script
-            Script("setTimeout(function() { window.location.reload(); }, 3000);"),
+            # HTMX auto-refresh every 5 seconds
+            hx_get=f"/jobs/{job_id}",
+            hx_trigger="every 5s",
+            hx_target="body",
+            cls="space-y-4",
         )
 
-        # Add meta refresh as well
-        return Html(
-            Head(
-                Title("Demusifier - Processing Video"),
-                Meta(name="viewport", content="width=device-width, initial-scale=1"),
-                Meta(httpEquiv="refresh", content="3"),
-            ),
-            Body(
-                DivCentered(
-                    Card(
-                        CardHeader(
-                            H2("🔄 Processing Your Video"),
-                            Label("Processing"),
-                        ),
-                        CardBody(
-                            Div(
-                                P(f"📄 Job ID: {job_id}"),
-                                P(f"📁 File: {job['original_filename']}"),
-                                Div(
-                                    Progress(value=job["progress"], max=100),
-                                    P(f"{job['progress']}% Complete"),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
+        return create_layout(
+            Card(
+                CardHeader(H2("🔄 Processing Your Video")),
+                CardBody(processing_content),
+            )
         )
 
     elif status == JOB_STATUS_COMPLETE:
@@ -584,7 +651,7 @@ def get_video_status(job_id: str):
                 Label("Error"),
             ),
             CardBody(
-                P("😞 Sorry, we encountered an issue processing your video."),
+                P("Sorry, we encountered an issue processing your video."),
                 Div(
                     H4("Error Details:"),
                     P(job.get("error_message", "Unknown error occurred")),
@@ -602,6 +669,37 @@ def get_video_status(job_id: str):
 def job_status(job_id: str):
     """Check job status and redirect appropriately"""
     return get_video_status(job_id)
+
+
+@app.delete("/videos/{video_filename}")
+def delete_video(video_filename: str):
+    """Delete a processed video file."""
+    file_path = os.path.join(OUTPUT_DIR, video_filename)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+            logger.info(f"Deleted video file: {file_path}")
+            # Return the updated videos list page
+            return videos_list()
+        except Exception as e:
+            logger.error(f"Error deleting video {video_filename}: {str(e)}")
+            return create_layout(
+                Alert(
+                    "❌ Delete Error",
+                    f"Failed to delete video: {str(e)}",
+                    BackButton("/videos"),
+                    cls=AlertT.error,
+                )
+            )
+    else:
+        return create_layout(
+            Alert(
+                "❌ Video Not Found",
+                f"Video file '{video_filename}' not found.",
+                BackButton("/videos"),
+                cls=AlertT.error,
+            )
+        )
 
 
 serve()

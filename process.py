@@ -121,10 +121,11 @@ def isolate_vocals_with_replicate(audio_path: str) -> str:
     if not REPLICATE_API_TOKEN:
         raise ValueError("REPLICATE_API_TOKEN not found in environment variables")
 
-    # Set the API token for replicate client
-    import os
-
-    os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
+    # Create a custom Replicate client with longer timeout (10 minutes)
+    client = replicate.Client(
+        api_token=REPLICATE_API_TOKEN,
+        timeout=600,  # 10 minutes timeout
+    )
 
     working_dir = os.path.dirname(audio_path)
     audio_name = Path(audio_path).stem
@@ -136,7 +137,7 @@ def isolate_vocals_with_replicate(audio_path: str) -> str:
 
         # Open the audio file for Replicate API
         with open(audio_path, "rb") as audio_file:
-            output = replicate.run(
+            output = client.run(
                 REPLICATE_MODEL,
                 input={
                     "audio": audio_file,
