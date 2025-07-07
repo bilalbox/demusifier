@@ -82,8 +82,10 @@ def login_form(req):
     return DivCentered(
         Card(
             CardHeader(
-                UkIcon(icon="audio-waveform", height=75, width=75),
-                H2("Demusicator"),
+                DivCentered(
+                    UkIcon(icon="audio-waveform", height=75, width=75),
+                    H2("Demusicator", cls=TextT.lg),
+                )
             ),
             CardBody(
                 A(
@@ -356,7 +358,7 @@ async def create_video_job(request: Request):
         thread.start()
 
         # Return 302 redirect to job status page
-        return RedirectResponse(url=f"/videos/{job_id}", status_code=302)
+        return RedirectResponse(url=f"/jobs/{job_id}", status_code=302)
 
     except Exception as e:
         logger.error(f"Error handling file upload: {str(e)}")
@@ -370,15 +372,12 @@ async def create_video_job(request: Request):
         )
 
 
-@app.get("/videos/{job_id}")
-def video_detail(job_id: str):
-    """Show video preview and download for a processed video by video_id."""
-    # Find the file in OUTPUT_DIR that starts with video_id
-    for fname in os.listdir(OUTPUT_DIR):
-        if fname.startswith(job_id + "_"):
-            file_path = os.path.join(OUTPUT_DIR, fname)
-            break
-    else:
+@app.get("/videos/{video_filename}")
+def video_detail(video_filename: str):
+    """Show video preview and download for a processed video by filename."""
+    # Check if file exists in OUTPUT_DIR
+    file_path = os.path.join(OUTPUT_DIR, video_filename)
+    if not os.path.exists(file_path):
         return create_layout(
             Alert(
                 "Video not found.",
@@ -394,13 +393,13 @@ def video_detail(job_id: str):
                 Video(
                     controls=True,
                     preload="metadata",
-                    src=f"/videos/{job_id}/stream",
+                    src=f"/videos/{video_filename}/stream",
                     cls="w-full max-w-lg mx-auto mb-4",
                 ),
                 Div(
                     A(
                         Button("⬇️ Download Video"),
-                        href=f"/videos/{job_id}/download",
+                        href=f"/videos/{video_filename}/download",
                         download=True,
                     ),
                     Button(
@@ -470,27 +469,27 @@ def list_videos():
     return videos
 
 
-@app.get("/videos/{video_id}/download")
-def download_video_by_id(video_id: str):
-    """Serve the processed video file for download by video_id."""
-    for fname in os.listdir(OUTPUT_DIR):
-        if fname.startswith(video_id + "_"):
-            file_path = os.path.join(OUTPUT_DIR, fname)
-            return FileResponse(path=file_path, media_type="video/mp4", filename=fname)
+@app.get("/videos/{video_filename}/download")
+def download_video_by_id(video_filename: str):
+    """Serve the processed video file for download by filename."""
+    file_path = os.path.join(OUTPUT_DIR, video_filename)
+    if os.path.exists(file_path):
+        return FileResponse(
+            path=file_path, media_type="video/mp4", filename=video_filename
+        )
     return Response("File not found", status_code=404)
 
 
-@app.get("/videos/{video_id}/stream")
-def stream_video_by_id(video_id: str):
-    """Serve the processed video file for streaming by video_id."""
-    for fname in os.listdir(OUTPUT_DIR):
-        if fname.startswith(video_id + "_"):
-            file_path = os.path.join(OUTPUT_DIR, fname)
-            return FileResponse(
-                path=file_path,
-                media_type="video/mp4",
-                headers={"Cache-Control": "no-cache"},
-            )
+@app.get("/videos/{video_filename}/stream")
+def stream_video_by_id(video_filename: str):
+    """Serve the processed video file for streaming by filename."""
+    file_path = os.path.join(OUTPUT_DIR, video_filename)
+    if os.path.exists(file_path):
+        return FileResponse(
+            path=file_path,
+            media_type="video/mp4",
+            headers={"Cache-Control": "no-cache"},
+        )
     return Response("File not found", status_code=404)
 
 
@@ -566,12 +565,10 @@ def get_video_status(job_id: str):
         )
 
     elif status == JOB_STATUS_COMPLETE:
-        # Redirect to video detail page
-        # Find the output file and extract video_id
+        # Redirect to video detail page using the clean filename
         output_file = job["output_file"]
         if output_file:
-            video_id = output_file.split("_", 1)[0]
-            return RedirectResponse(url=f"/videos/{video_id}", status_code=302)
+            return RedirectResponse(url=f"/videos/{output_file}", status_code=302)
         else:
             return create_layout(
                 Alert(
@@ -601,42 +598,10 @@ def get_video_status(job_id: str):
         return create_layout(error_content)
 
 
-@app.get("/videos/{job_id}/download")
-def download_video(job_id: str):
-    """Serve the processed video file for download or streaming"""
-    if job_id not in jobs:
-        return Response("Job not found", status_code=404)
-
-    job = jobs[job_id]
-    if job["status"] != JOB_STATUS_COMPLETE or not job["output_file"]:
-        return Response("Video not ready", status_code=404)
-
-    file_path = os.path.join(OUTPUT_DIR, job["output_file"])
-    if not os.path.exists(file_path):
-        return Response("File not found", status_code=404)
-
-    return FileResponse(
-        path=file_path, media_type="video/mp4", filename=job["output_file"]
-    )
-
-
-@app.get("/videos/{job_id}/stream")
-def stream_video(job_id: str):
-    """Serve the processed video file for streaming/embedding"""
-    if job_id not in jobs:
-        return Response("Job not found", status_code=404)
-
-    job = jobs[job_id]
-    if job["status"] != JOB_STATUS_COMPLETE or not job["output_file"]:
-        return Response("Video not ready", status_code=404)
-
-    file_path = os.path.join(OUTPUT_DIR, job["output_file"])
-    if not os.path.exists(file_path):
-        return Response("File not found", status_code=404)
-
-    return FileResponse(
-        path=file_path, media_type="video/mp4", headers={"Cache-Control": "no-cache"}
-    )
+@app.get("/jobs/{job_id}")
+def job_status(job_id: str):
+    """Check job status and redirect appropriately"""
+    return get_video_status(job_id)
 
 
 serve()
