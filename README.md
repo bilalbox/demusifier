@@ -1,6 +1,7 @@
 # Demusifier
+
 ![img](Demusifier.png)
-A tool that automatically removes background music from videos while preserving speech/vocals using Lightning AI's cloud infrastructure.
+A web app that automatically removes background music from uploaded videos while preserving speech/vocals using Demucs running on Runpod.io's cloud infrastructure.
 
 ## Overview
 
@@ -10,13 +11,14 @@ This project consists of several Python scripts that work together to:
 2. Process them using Demucs to separate vocals from background music
 3. Create a new video with only the vocals/speech track
 
-## Prerequisites
+## Technologies Used
 
 - Python 3.11+
-- [Lightning AI](https://lightning.ai) account
-- Lightning AI API key
-- FFmpeg installed locally
-- GPU access on Lightning AI (T4 recommended)
+- [Runpod.io](https://runpod.io) account
+- [Demucs STEM separator](https://github.com/facebookresearch/demucs)
+- [Demucs container from Replicate registry](https://replicate.com/ryan5453/demucs)
+
+TODO: NEEDS TO BE REWRITTEN
 
 ## Installation
 
@@ -42,15 +44,17 @@ pip install -r requirements.txt
 
 4. Create a `.env` file in the project root:
 
-```plaintext
-LIGHTNING_API_KEY=your_api_key_here
-LIGHTNING_USER=your_username_here
-LIGHTNING_TEAMSPACE=your_teamspace_name_here
+```shell
+VOLUME_DIR="/data"
+LOG_LEVEL="INFO"
+CONSOLE_LOGGING="True"
+RUNPOD_ENDPOINT="https://api.runpod.ai/v2/123/run"
+RUNPOD_API_KEY="rpa_FAKEFAKEFAKERC18ox4v"
 ```
 
 ## Project Structure
 
-```
+```shell
 demusifier/
 ├── light_it.py          # Main script for Lightning AI integration
 ├── demusic.py        # Video processing script
@@ -61,48 +65,51 @@ demusifier/
 └── .env                # Environment variables
 ```
 
+## Processing Sequence
+
+```mermaid
+sequenceDiagram
+        participant ui as Web UI
+        participant ws as Web Server
+        participant gpu as GPUaaS
+        participant s3 as Storage Bucket
+        ui->>ws: POST /videos
+        ws->>ui: 202 + /videos/videoId
+        loop Polling
+        ui->>ws: GET /videos/videoId
+        ws->>ui: 200 + statusPage
+        end
+        ws->ws: Download video (yt-dlp)
+        ws->ws: Split media streams (ffmpeg)
+        ws->ws: Speed audio stream (ffmpeg)
+        ws->>gpu: Send audio stream to GPU
+        gpu->gpu: Isolate vocals (demucs)
+        gpu->>ws: Return clean audio
+        ws->ws: Merge audio and video (ffmpeg)
+        ws->>s3: POST processed video file
+        s3->>ws: 201 storageUrl
+        ui->>ws: GET /videos/videoId
+        ws->>ui: 200 + video page (includes embedded player for storageUrl)
+        ui->>s3: streaming video from storageUrl
+```
+
 ## Setup in Lightning AI
 
-1. Create a Lightning AI account at [lightning.ai](https://lightning.ai)
+1. Create a Runpod.io account at [runpod.io](https://runpod.io)
 2. Create an API key:
    - Go to Settings -> API Keys
    - Generate a new key
    - Copy it to your `.env` file
 
-
 ## Usage
 
-Run the script with a video URL:
-
-```bash
-python light_it.py "https://www.example.com/video_id"
-```
-
-The script will:
-
-1. Download the video
-2. Start a Lightning AI studio
-3. Install required dependencies
-4. Process the video (remove background music)
-5. Download the processed video
-
-## Expected Output
-
-- Progress indicators for each step
-- The processed video will be saved in `videos/output/`
-- The output video will have the same video track but only vocals/speech audio
+TODO: NEEDS TO BE REWRITTEN
 
 ## Processing Steps
 
-1. **Download**: Video is downloaded and sanitized
-2. **Studio Setup**: Creates and configures Lightning AI studio
-3. **Dependencies**: Installs required packages
-4. **Processing**:
-   - Extracts audio
-   - Uses Demucs to separate vocals
-   - Merges vocals with original video
-5. **Cleanup**: Removes temporary files and stops the studio
+TODO: NEEDS TO BE REWRITTEN
 
 ## TODO
 
-- Currently, script works with a sinlge video file. It needs to accept and process playlists
+- Currently, script works with a single video file. It needs to accept upload of a video folder
+- It would be nice to implement yt-dlp but bot detection / cookie management is still a problem
